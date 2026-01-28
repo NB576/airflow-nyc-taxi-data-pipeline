@@ -54,9 +54,9 @@ def nyc_taxi_dynamic():
             return run_data_quality_checks(year_month)
         
         @task
-        def transform_raw_to_staging(s3_key):
-            run_transform_to_staging(s3_key)
-        
+        def transform_raw_to_staging(year_month, s3_key):
+            run_transform_to_staging(year_month, s3_key)
+
         #link tasks that 
         url_task = get_url(year_month)
         upload_task = upload_to_s3(year_month, url_task)
@@ -71,6 +71,6 @@ def nyc_taxi_dynamic():
     results = monthly_pipeline.expand(year_month=year_month_list)
         
 nyc_taxi_dynamic()
-        
+   
 
             

@@ -3,7 +3,7 @@ from include.nyc_taxi.constants import S3_BUCKET, BROWSER_HEADERS
 from include.nyc_taxi.utils import get_storage_options
 from include.nyc_taxi.config import s3_fs, default_conn
 import include.nyc_taxi.errors as errors
-import pyarrow.parquet as pq
+import pyarrow as pa
 import pandas as pd
 
 from airflow.models import Connection
@@ -146,36 +146,62 @@ def run_data_quality_checks(year_month,
 
     return s3_key
 
-def run_transform_to_staging(s3_key):
+def run_transform_to_staging(year_month, s3_key):
+    year_month_split = year_month.split("-")
+    year = year_month_split[0]
+    month = year_month_split[1]
 
     df = pd.read_parquet(path=f"s3://{s3_key}",
                             storage_options=get_storage_options()
                             )
     
-    df["pickup_datetime"] = pd.to_datetime(df["tpep_pickup_datetime"])
-    df['dropoff_datetime'] = pd.to_datetime(df['tpep_dropoff_datetime'])
-    df["trip_duration_date_seconds"] = (df["dropoff_datetime"] - df["pickup_datetime"]).dt.total_seconds()
+    # dtype_mapping = {
+    #     'tpep_pickup_datetime': 'datetime64[ns]',
+    #     'tpep_dropoff_datetime': 'datetime64[ns]',
+    #     'passenger_count': 'float64',
+    #     'trip_distance': 'float32',
+    #     'fare_amount': 'float32',
+    #     'total_amount': 'float32',
+    #     'PULocationID': 'int32',
+    #     'DOLocationID': 'int32'
+    # }
 
-    # filter anomaly rows (based on business rules)
-    df = df[(df["trip_duration_seconds"] > 30) & 
-            (df["trip_duration_seconds"] < 24*3600) &
-            
-            (df["passenger_counts"].between(1,6))
-            ]
+    # drop invalid datetime rows
+    df["tpep_pickup_datetime"] = pd.to_datetime(df["tpep_pickup_datetime"], errors="coerce")
+    df['tpep_dropoff_datetime'] = pd.to_datetime(df['tpep_dropoff_datetime'], errors="coerce")
     
-    #add partitioning columns
-    df["year"] = df['pickup_datetime'].dt.year
-    df["month"] = df['pickup_datetime'].dt.month
-    df["day"] = df['pickup_datetime'].dt.day
+    df = df.dropna(subset=["tpep_pickup_datetime", "tpep_dropoff_datetime"])
 
-    # staging_path = f"curated/year={year}/month={month:02d}/"
-    # table = pq.Table.from_pandas(df)
-    # pq.write_to_dataset(
-    #     table,
-    #     root_path=f"{S3_BUCKET}/{staging_path}",
-    #     filesystem=s3_fs,
-    #     partition_cols=["year", "month", "day"]
-    #                     )
+    #add partitioning columns
+    df["year"] = df['tpep_pickup_datetime'].dt.year
+    df["month"] = df['tpep_pickup_datetime'].dt.month
+
+    # Filter out invalid rows
+    df = df[(df["tpep_pickup_datetime"] < df["tpep_dropoff_datetime"]) &            
+            (df["passenger_count"].between(1,6)) &
+            (df["trip_distance"] > 0) &
+            (df["fare_amount"] > 0) &
+            (df["total_amount"] > 0) &
+            (df["year"] == int(year)) &
+            (df["month"] == int(month))]
+    
+    # Ensure location ids are valid (between 1-265 for nyc taxi zones)
+    df = df[(df["PULocationID"].between(1, 265)) &
+            (df["DOLocationID"].between(1, 265))]
+
+    # Ensure trip duration is less than 2hrs
+    df["day"] = df['tpep_pickup_datetime'].dt.day
+    df["trip_duration"] = (df["tpep_dropoff_datetime"] - df["tpep_pickup_datetime"]).dt.total_seconds() / 60
+    df = df[df["trip_duration"].between(1, 120)]
+
+    staging_path = f"curated/staging/"
+    table = pa.Table.from_pandas(df)
+    pa.parquet.write_to_dataset(
+        table,
+        root_path=f"{S3_BUCKET}/{staging_path}",
+        filesystem=s3_fs,
+        partition_cols=["year", "month"]
+                        )
 
 
 
