@@ -12,12 +12,24 @@ class SchemaValidationError(DataQualityError):
     def __init__(self, msg):
         super().__init__(msg) 
 
+class NonNullColumnError(DataQualityError):
+    """Raised when pickup or dropoff columns contain a null value"""
+    def __init__(self, col: str, null_count: int):
+        super().__init(f"Non null column {col} contains {null_count} nulls")
+
 class NullThresholdError(DataQualityError):
     """Raised when null percentage exceeds threshold for a column"""
 
-    def __init__(self, column, null_pct, threshold_pct):
-        msg = f"Null threshold exceeded: '{column}' null_pct={null_pct:.1f}%, threshold={threshold_pct}%"
+    def __init__(self, cols : list,threshold_pct: float):
+        cols_str = ', '.join(cols)
+        msg = f"Null threshold {threshold_pct}% exceeded for columns [{cols_str}]"
         super().__init__(msg)
+
+class TotalNullsThresholdError(DataQualityError):
+    "Raised when total nulls exceeds specified threshold"
+
+    def __init__(self, total_null_pct, total_null_threshold_pct):
+        msg = f"Total null {total_null_pct}% exceeds threshold of {total_null_threshold_pct}"
 
 class MiniumumRowsError(DataQualityError):
     """Raised when minimum row threshold not exceeded"""
@@ -28,8 +40,8 @@ class MiniumumRowsError(DataQualityError):
 
 class NegativeDurationThresholdError(DataQualityError):
     """Raised when negative duration percentage exceeded"""
-    def __init__(self,  neg_dur_pct, max_rows_threshold):
-        msg = f"Maximum negative duration threshold exceeded: negative_duation_pct={neg_dur_pct:.1f}%, max_threshold={max_rows_threshold}%"
+    def __init__(self,  neg_dur_pct, max_rows_threshold_pct):
+        msg = f"Maximum negative duration threshold exceeded: negative_duation_pct={neg_dur_pct}%, max_threshold={max_rows_threshold_pct}%"
         super().__init__(msg)
 
 class DataSourceMissingError(DataQualityError):
