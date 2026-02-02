@@ -5,6 +5,7 @@ from include.nyc_taxi.config import s3_fs, default_conn
 import include.nyc_taxi.errors as errors
 import pyarrow as pa
 import pandas as pd
+import numpy as np
 
 from airflow.models import Connection
 from s3fs import S3FileSystem
@@ -154,27 +155,15 @@ def run_transform_to_staging(year_month, s3_key):
     df = pd.read_parquet(path=f"s3://{s3_key}",
                             storage_options=get_storage_options()
                             )
-    
-    # dtype_mapping = {
-    #     'tpep_pickup_datetime': 'datetime64[ns]',
-    #     'tpep_dropoff_datetime': 'datetime64[ns]',
-    #     'passenger_count': 'float64',
-    #     'trip_distance': 'float32',
-    #     'fare_amount': 'float32',
-    #     'total_amount': 'float32',
-    #     'PULocationID': 'int32',
-    #     'DOLocationID': 'int32'
-    # }
 
     # drop invalid datetime rows
     df["tpep_pickup_datetime"] = pd.to_datetime(df["tpep_pickup_datetime"], errors="coerce")
     df['tpep_dropoff_datetime'] = pd.to_datetime(df['tpep_dropoff_datetime'], errors="coerce")
     
     df = df.dropna(subset=["tpep_pickup_datetime", "tpep_dropoff_datetime"])
-
-    #add partitioning columns
-    df["year"] = df['tpep_pickup_datetime'].dt.year
-    df["month"] = df['tpep_pickup_datetime'].dt.month
+    
+    # add trip duration  column (used in invalid row filter)
+    df["trip_duration"] = (df["tpep_dropoff_datetime"] - df["tpep_pickup_datetime"]).dt.total_seconds() / 60
 
     # Filter out invalid rows
     df = df[(df["tpep_pickup_datetime"] < df["tpep_dropoff_datetime"]) &            
@@ -183,19 +172,77 @@ def run_transform_to_staging(year_month, s3_key):
             (df["fare_amount"] > 0) &
             (df["total_amount"] > 0) &
             (df["year"] == int(year)) &
-            (df["month"] == int(month))]
-    
-    # Ensure location ids are valid (between 1-265 for nyc taxi zones)
-    df = df[(df["PULocationID"].between(1, 265)) &
+            (df["month"] == int(month)) &
+            (df["trip_duration"].between(1, 120)) &
+            (df["PULocationID"].between(1, 265)) &
             (df["DOLocationID"].between(1, 265))]
 
-    # Ensure trip duration is less than 2hrs
-    df["day"] = df['tpep_pickup_datetime'].dt.day
-    df["trip_duration"] = (df["tpep_dropoff_datetime"] - df["tpep_pickup_datetime"]).dt.total_seconds() / 60
-    df = df[df["trip_duration"].between(1, 120)]
+    # enrich with additional time based columns
+    df["year"] = df['tpep_pickup_datetime'].dt.year
+    df["month"] = df['tpep_pickup_datetime'].dt.month
+    df["pickup_hour"] = df['tpep_pickup_datetime'].dt.hour
+    df["pickup_dayofweek"] = df['tpep_pickup_datetime'].dt.dayofweek  # 0=Mon, 6=Sun
+    df["pickup_weekend"] = df["pickup_dayofweek"].isin([5,6]).astype(int)
+
+
+    # enrich with monetary ratio columns
+    df["tip_rate"] = df["tip_amount"] / df["fare_amount"]
+    df["fare_per_mile"] = df["fare_amount"] / df["trip_distance"]
+    df["fare_per_minute"] = df["fare_amount"] / df["trip_duration"]
+    
+    #  enrich with categorical standardization (converts payment_type, ratecode column encodings)
+    payment_map = { 0: "Flex Fare", 1: "Credit", 2: "Cash", 3: "No Charge", 4: "Dispute", 5: "Unknown", 6: "Voided" }
+    ratecode_map = { 1: "Standard", 2: "JFK", 3: "Newark", 4: "Nassau/Westchester", 5: "Negotiated", 6: "Group ride", 99: "Null/Unknown" }
+
+    df["payment_type_name"] = df["payment_type"].map(payment_map)
+    df["rate_code_name"] = df["RatecodeID"].map(ratecode_map)
+    
+    # enrich with trip efficiency measure column
+    df["avg_speed_mph"] = df["trip_distance"] / (df["trip_duration"] / 60)
+
+    # final curated column selection and type casting
+    curated_columns = [
+        "vendor_id", "tpep_pickup_datetime", "tpep_dropoff_datetime",
+        "pickup_hour", "pickup_dayofweek", "pickup_weekend", "pickup_month",
+        "passenger_count", "trip_distance", "PULocationID", "DOLocationID",
+        "RatecodeID", "rate_code_name", "payment_type", "payment_type_name",
+        "fare_amount", "extra", "mta_tax", "tip_amount", "tolls_amount",
+        "total_amount", "tip_rate", "fare_per_mile", "fare_per_minute",
+        "trip_duration", "avg_speed_mph", "year", "month", "day"
+    ]
+
+    # create copy to avoid pandas SettingsWithCopy warning (when modifing a view of a df)
+    df_staging = df[curated_columns].copy()
+
+    # cast columns to appropriate data types for consistent typing across staging, curated layers
+    int_small_cols = [ 
+        "vendor_id", "pickup_hour", "pickup_dayofweek", "pickup_weekend",
+        "pickup_month", "passenger_count", "PULocationID", "DOLocationID",  
+        "RatecodeID", "year", "month", "day", "payment_type", 
+    ]
+    
+    cat_cols = [
+        "payment_type_name", "rate_code_name"
+    ]
+
+    float_cols = [
+        "trip_distance", "trip_duration", "fare_amount", "extra", 
+        "mta_tax", "tip_amount", "tolls_amount", "total_amount",
+        "tip_rate", "fare_per_mile", "fare_per_minute", "avg_speed_mph"
+    ]
+
+    for c in int_small_cols:
+        df_staging[c] = df_staging[c].astype("int16")
+
+    for c in cat_cols:
+        df_staging[c] = df_staging[c].astype("category")
+
+    for c in float_cols:
+        df_staging[c] = df_staging[c].astype("float32")
+
 
     staging_path = f"curated/staging/"
-    table = pa.Table.from_pandas(df)
+    table = pa.Table.from_pandas(df_staging)
     pa.parquet.write_to_dataset(
         table,
         root_path=f"{S3_BUCKET}/{staging_path}",

@@ -49,15 +49,17 @@ def nyc_taxi_dynamic():
             else:
                 print(f"{key} already present in bucket {S3_BUCKET}")
         
+        # check whether data is within acceptability thresholds to proceed
         @task
         def quality_check_raw_data(year_month):
             return run_data_quality_checks(year_month)
         
+        # perform basic transformations on raw data, upload to staging dir
         @task
         def transform_raw_to_staging(year_month, s3_key):
             run_transform_to_staging(year_month, s3_key)
 
-        #link tasks that 
+        #link tasks in taskgroup 
         url_task = get_url(year_month)
         upload_task = upload_to_s3(year_month, url_task)
         quality_check_task = quality_check_raw_data(year_month)
