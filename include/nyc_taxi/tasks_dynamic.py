@@ -147,7 +147,7 @@ def run_data_quality_checks(year_month,
 
     return s3_key
 
-def run_transform_to_staging(year_month, s3_key):
+def run_transform_raw_to_staging(year_month, s3_key):
     year_month_split = year_month.split("-")
     year = year_month_split[0]
     month = year_month_split[1]
@@ -162,8 +162,10 @@ def run_transform_to_staging(year_month, s3_key):
     
     df = df.dropna(subset=["tpep_pickup_datetime", "tpep_dropoff_datetime"])
     
-    # add trip duration  column (used in invalid row filter)
+    # create cols used in invalid row filter)
     df["trip_duration"] = (df["tpep_dropoff_datetime"] - df["tpep_pickup_datetime"]).dt.total_seconds() / 60
+    df["year"] = df['tpep_pickup_datetime'].dt.year
+    df["month"] = df['tpep_pickup_datetime'].dt.month
 
     # Filter out invalid rows
     df = df[(df["tpep_pickup_datetime"] < df["tpep_dropoff_datetime"]) &            
@@ -178,12 +180,9 @@ def run_transform_to_staging(year_month, s3_key):
             (df["DOLocationID"].between(1, 265))]
 
     # enrich with additional time based columns
-    df["year"] = df['tpep_pickup_datetime'].dt.year
-    df["month"] = df['tpep_pickup_datetime'].dt.month
     df["pickup_hour"] = df['tpep_pickup_datetime'].dt.hour
     df["pickup_dayofweek"] = df['tpep_pickup_datetime'].dt.dayofweek  # 0=Mon, 6=Sun
     df["pickup_weekend"] = df["pickup_dayofweek"].isin([5,6]).astype(int)
-
 
     # enrich with monetary ratio columns
     df["tip_rate"] = df["tip_amount"] / df["fare_amount"]
@@ -202,23 +201,23 @@ def run_transform_to_staging(year_month, s3_key):
 
     # final curated column selection and type casting
     curated_columns = [
-        "vendor_id", "tpep_pickup_datetime", "tpep_dropoff_datetime",
-        "pickup_hour", "pickup_dayofweek", "pickup_weekend", "pickup_month",
+        "VendorID", "tpep_pickup_datetime", "tpep_dropoff_datetime",
+        "pickup_hour", "pickup_dayofweek", "pickup_weekend",
         "passenger_count", "trip_distance", "PULocationID", "DOLocationID",
         "RatecodeID", "rate_code_name", "payment_type", "payment_type_name",
         "fare_amount", "extra", "mta_tax", "tip_amount", "tolls_amount",
         "total_amount", "tip_rate", "fare_per_mile", "fare_per_minute",
-        "trip_duration", "avg_speed_mph", "year", "month", "day"
+        "trip_duration", "avg_speed_mph", "year", "month"
     ]
 
-    # create copy to avoid pandas SettingsWithCopy warning (when modifing a view of a df)
+    # create copy to avoid pandas SettingsWithCopy warning in logs (modifing a view of a df)
     df_staging = df[curated_columns].copy()
 
     # cast columns to appropriate data types for consistent typing across staging, curated layers
     int_small_cols = [ 
-        "vendor_id", "pickup_hour", "pickup_dayofweek", "pickup_weekend",
-        "pickup_month", "passenger_count", "PULocationID", "DOLocationID",  
-        "RatecodeID", "year", "month", "day", "payment_type", 
+        "VendorID", "pickup_hour", "pickup_dayofweek", "pickup_weekend",
+        "passenger_count", "PULocationID", "DOLocationID",  
+        "RatecodeID", "year", "month", "payment_type", 
     ]
     
     cat_cols = [
@@ -240,15 +239,12 @@ def run_transform_to_staging(year_month, s3_key):
     for c in float_cols:
         df_staging[c] = df_staging[c].astype("float32")
 
-
-    staging_path = f"curated/staging/"
+    staging_path = s3_key.replace("raw", "staging") + f"yellow_tripdata_{year}-{month}.parquet"
     table = pa.Table.from_pandas(df_staging)
-    pa.parquet.write_to_dataset(
-        table,
-        root_path=f"{S3_BUCKET}/{staging_path}",
-        filesystem=s3_fs,
-        partition_cols=["year", "month"]
-                        )
+
+    with s3_fs.open(staging_path, "wb") as f:
+        pa.parquet.write_table(table, f)
+
 
 
 
