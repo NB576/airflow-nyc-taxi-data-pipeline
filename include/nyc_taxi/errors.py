@@ -41,7 +41,7 @@ class MiniumumRowsError(DataQualityError):
 class NegativeDurationThresholdError(DataQualityError):
     """Raised when negative duration percentage exceeded"""
     def __init__(self,  neg_dur_pct, max_rows_threshold_pct):
-        msg = f"Maximum negative duration threshold exceeded: negative_duation_pct={neg_dur_pct}%, max_threshold={max_rows_threshold_pct}%"
+        msg = f"negative_duation_pct={neg_dur_pct:.1f}%, max_threshold={max_rows_threshold_pct}%"
         super().__init__(msg)
 
 class DataSourceMissingError(DataQualityError):

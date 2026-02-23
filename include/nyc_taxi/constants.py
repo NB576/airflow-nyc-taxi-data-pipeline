@@ -2,8 +2,8 @@ from pendulum import datetime
 
 S3_BUCKET = "nyc-taxi-project-112025"
 
-START_DATE = datetime(2024, 7, 1)
-END_DATE = datetime(2024, 12, 1)
+START_DATE = datetime(2024, 1, 1)
+END_DATE = datetime(2024, 6, 1)
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

@@ -1,9 +1,11 @@
 from airflow.decorators import dag, task, task_group
 from airflow.operators.python import PythonOperator
 from pendulum import datetime
-from include.nyc_taxi.tasks_dynamic import generate_monthly_dates_2024, run_data_quality_checks, run_transform_to_staging
+from include.nyc_taxi.tasks.raw import generate_monthly_dates, run_data_quality_checks
+from include.nyc_taxi.tasks.staging import staging_transform
+from include.nyc_taxi.tasks.curated import curated_transform
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-from include.nyc_taxi.constants import S3_BUCKET, BROWSER_HEADERS
+from include.nyc_taxi.constants import S3_BUCKET, BROWSER_HEADERS, START_DATE, END_DATE
 
 import requests
 
@@ -17,10 +19,10 @@ def nyc_taxi_dynamic():
 
     @task
     def get_monthly_dates():
-        return generate_monthly_dates_2024()
+        return generate_monthly_dates(START_DATE, END_DATE)
 
     @task_group
-    def monthly_pipeline(year_month):
+    def raw_to_staging(year_month):
 
         @task
         def get_url(year_month):
@@ -57,20 +59,37 @@ def nyc_taxi_dynamic():
         # perform basic transformations on raw data, upload to staging dir
         @task
         def transform_raw_to_staging(year_month, s3_key):
-            run_transform_to_staging(year_month, s3_key)
+            return staging_transform(year_month, s3_key)
 
         #link tasks in taskgroup 
         url_task = get_url(year_month)
         upload_task = upload_to_s3(year_month, url_task)
         quality_check_task = quality_check_raw_data(year_month)
-        transform_to_staging_task = transform_raw_to_staging(year_month, quality_check_task)
+        transform_raw_to_staging_task = transform_raw_to_staging(year_month, quality_check_task)
 
-        url_task >> upload_task >> quality_check_task >> transform_to_staging_task
+        url_task >> upload_task >> quality_check_task >> transform_raw_to_staging_task
 
-        return transform_raw_to_staging
+        return transform_raw_to_staging_task
+
+    @task
+    def aggregate_successful_file_uploads(**context):
+        successful_upload_keys = context['ti'].xcom_pull(task_ids='raw_to_staging.transform_raw_to_staging')
+
+        return successful_upload_keys
     
-    year_month_list = get_monthly_dates()
-    results = monthly_pipeline.expand(year_month=year_month_list)
+    @task
+    def staging_to_curated(monthly_dates, file_list):
+        print("")
+        print("----------------- STAGING TO CURATED TASK IS EXECUTING -----------------------")
+        print("")
+        return curated_transform(monthly_dates, file_list) 
+
+    year_month_list_task = get_monthly_dates()
+    raw_to_staging_taskgroup = raw_to_staging.expand(year_month=year_month_list_task)
+    aggregate_successful_file_uploads_task = aggregate_successful_file_uploads()
+    staging_to_curated_task = staging_to_curated(year_month_list_task, aggregate_successful_file_uploads_task)
+
+    raw_to_staging_taskgroup >> aggregate_successful_file_uploads_task 
         
 nyc_taxi_dynamic()
    

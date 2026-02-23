@@ -11,3 +11,5 @@ airflow.cfg
 airflow.db
 tasks.py
 nyc_taxi.py
+
+upgrade-test* 
