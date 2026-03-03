@@ -9,8 +9,8 @@ airflow-webserver.pid
 webserver_config.py
 airflow.cfg
 airflow.db
-tasks.py
-nyc_taxi.py
 
 upgrade-test* 
 notes/
+Dockerfile_annotated
+dags/nyc_taxi_annotated.py
