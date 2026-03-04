@@ -28,15 +28,16 @@ def main(start_date, end_date):
 def build_facts_table(df_staging):
     df_facts = df_staging \
         .withColumn("trip_id", F.sha2( # use min required columns to uniquely identify a trip
-            F.concat_ws("||",
-                F.coalesce(F.col("VendorID").cast("string"),        F.lit("NULL")),
-                F.coalesce(F.col("tpep_pickup_datetime").cast("string"),  F.lit("NULL")),
+            F.concat_ws(
+                "||",
+                F.coalesce(F.col("VendorID").cast("string"), F.lit("NULL")),
+                F.coalesce(F.col("tpep_pickup_datetime").cast("string"), F.lit("NULL")),
                 F.coalesce(F.col("tpep_dropoff_datetime").cast("string"), F.lit("NULL")),
-                F.coalesce(F.col("PULocationID").cast("string"),    F.lit("NULL")),
-                F.coalesce(F.col("DOLocationID").cast("string"),    F.lit("NULL")),
-                F.coalesce(F.col("RatecodeID").cast("string"),      F.lit("NULL")),
-                F.coalesce(F.col("payment_type").cast("string"),    F.lit("NULL")),
-            ), 256)) \
+                F.coalesce(F.col("PULocationID").cast("string"), F.lit("NULL")),
+                F.coalesce(F.col("DOLocationID").cast("string"), F.lit("NULL")),
+                F.coalesce(F.col("RatecodeID").cast("string"), F.lit("NULL")),
+                F.coalesce(F.col("payment_type").cast("string"), F.lit("NULL"))),
+              256)) \
         .withColumn("pickup_date_id", F.dayofyear("tpep_pickup_datetime").cast(IntegerType())) \
         .withColumn("pickup_time_id", (F.col("pickup_hour") * 100 + F.col("pickup_dayofweek")* 10).cast(IntegerType())) \
         .withColumn("pickup_location_id", F.col("PULocationID").cast(IntegerType())) \
@@ -153,6 +154,36 @@ def build_dim_time(spark: SparkSession):
     print("")
     print(f"dim_time written — {dim_time.count()} rows")
     print("")
+
+def main(start_date: str, end_date: str):
+    spark = SparkSession.builder \
+        .appName("nyc-taxi-curated-transform") \
+        .getOrCreate()
+
+    year = datetime.strptime(start_date, "%Y-%m-%d").year
+    print("")
+    print(f"Reading staging data for year {year}...")
+    print("")
+
+    df_staging = spark.read.parquet(f"s3a://{S3_BUCKET}/staging/{year}/*/")
+
+    print("")
+    print(f"Loaded {df_staging.count()} rows from staging...")
+    print("")
+
+    build_facts_table(df_staging, spark)
+    build_dim_date(start_date, end_date, spark)
+    build_dim_location(spark)
+    build_dim_payment(spark)
+    build_dim_time(spark)
+
+    spark.stop()
+
+    print("")
+    print("Curated transform complete.")            
+    print("")
+
+    
 
 if __name__ == "__main__":
     import sys
