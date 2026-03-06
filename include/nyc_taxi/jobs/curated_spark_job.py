@@ -96,7 +96,7 @@ def build_dim_date(start_date: str, end_date: str, spark: SparkSession):
         .withColumn("month_name", F.date_format("full_date", "MMMM")) \
         .withColumn("day", F.dayofmonth("full_date").cast(IntegerType())) \
         .withColumn("day_name", F.date_format("full_date", "EEEE")) \
-        .withColumn("day_of_week", F.dayofweek("full_date").cast(IntegerType())) \
+        .withColumn("day_of_week", F.dayofweek("full_date")) \
         .withColumn("weekend", F.when(F.dayofweek("full_date").isin([1,7]), 1).otherwise(0).cast(IntegerType())) \
         .drop("id")
     
@@ -180,16 +180,16 @@ def main(start_date: str, end_date: str):
     spark.stop()
 
     print("")
-    print("Curated transform complete.")            
+    print("Curated transform complete")            
     print("")
 
-    
+
 
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 3:
-        print("Usage: curated_job.py <start_date> <end_date>")
+        print("Usage: curated_spark_job.py <start_date> <end_date>")
         sys.exit(1)
 
     start_date = sys.argv[1]
