@@ -14,3 +14,4 @@ upgrade-test*
 notes/
 Dockerfile_annotated
 dags/nyc_taxi_annotated.py
+include/nyc_taxi/jobs/annotated/
