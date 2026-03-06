@@ -15,7 +15,7 @@ def staging_transform(df_raw):
     
     # add additional columns required for filtering
     df = df \
-        .withColumn("trip_duration_mins", (F.col("tpep_dropoff_datetime").cast("long") - F.col("tpep_pickup_datetime").cast("long")) / 60) \
+        .withColumn("trip_duration_minutes", (F.col("tpep_dropoff_datetime").cast("long") - F.col("tpep_pickup_datetime").cast("long")) / 60) \
         .withColumn("year", F.year("tpep_pickup_datetime")) \
         .withColumn("month", F.month("tpep_pickup_datetime"))
     
@@ -26,7 +26,7 @@ def staging_transform(df_raw):
         (F.col("trip_distance") > 0) &
         (F.col("fare_amount") > 0) &
         (F.col("total_amount") > 0) &
-        (F.col("trip_duration_mins").between(1, 120)) &
+        (F.col("trip_duration_minutes").between(1, 120)) &
         (F.col("PULocationID").between(1, 265)) &
         (F.col("DOLocationID").between(1, 265))
     )
@@ -41,7 +41,7 @@ def staging_transform(df_raw):
     df = df \
         .withColumn("tip_rate", F.col("tip_amount") / F.col("fare_amount")) \
         .withColumn("fare_per_mile", F.col("fare_amount") / F.col("trip_distance")) \
-        .withColumn("fare_per_minute", F.col("fare_amount") / F.col("trip_duration_mins")) \
+        .withColumn("fare_per_minute", F.col("fare_amount") / F.col("trip_duration_minutes")) \
         .withColumn("revenue", F.col("fare_amount") + F.col("extra") + F.col("tip_amount"))
     
     # categorical enrichment
@@ -50,8 +50,9 @@ def staging_transform(df_raw):
         .withColumn("rate_code_name", helpers.map_col(mapping=RATECODE_MAP, input_col="rate_code_name"))
     
     # enrich with trip efficiency measure column
-    df = df.withColumn("avg_speed_mph", F.col("trip_distance") / (F.col("trip_duration_mins") / 60))
+    df = df.withColumn("avg_speed_mph", F.col("trip_distance") / (F.col("trip_duration_minutes") / 60))
 
+    # final staging df column selection, casting to respective types
     df = df.select(
         F.col("VendorID").cast(ShortType()),
         F.col("tpep_pickup_datetime"),
@@ -76,7 +77,7 @@ def staging_transform(df_raw):
         F.col("tip_rate").cast(FloatType()),
         F.col("fare_per_mile").cast(FloatType()),
         F.col("fare_per_minute").cast(FloatType()),
-        F.col("trip_duration_mins").cast(FloatType()),
+        F.col("trip_duration_minutes").cast(FloatType()),
         F.col("avg_speed_mph").cast(FloatType()),
         F.col("revenue").cast(FloatType()),
         F.col("year").cast(ShortType()),
