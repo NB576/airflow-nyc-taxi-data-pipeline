@@ -86,12 +86,12 @@ def staging_transform(df_raw):
 
     return df
 
-def main(start_date: str):
+def main(year: str):
     spark = SparkSession.builder \
         .appName("nyc-taxi-staging-transform") \
         .getOrCreate()
     
-    year = datetime.strptime(start_date, "%Y-%m-%d").year
+    year = datetime(year, 1, 1).year
     print("")
     print(f"Reading staging data for year {year}...")
     print("")
@@ -117,7 +117,7 @@ if __name__ == "__main__":
         print("Usage: staging_spark_job.py <start_date>")
         sys.exit(1)
     
-    start_date = sys.argv[1]
+    year = sys.argv[1]
 
-    main(start_date)
+    main(year)
     

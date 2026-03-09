@@ -6,26 +6,28 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType, FloatType
 from datetime import datetime
 
-def main(start_date, end_date):
+def main(year):
     spark = SparkSession.builder \
         .appName("nyc-taxi-curated-transform") \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
         .getOrCreate()
 
-    year = datetime.strptime(start_date, "%Y-%m-%d").year
-
-    df_staging = spark.read.parquet(f"s3a://{S3_BUCKET}/staging/{year}/*/*.parquet")
+    df_staging = spark.read.parquet(f"s3a://{S3_BUCKET}/staging/") \
+        .filter(F.col("year") == 2024)
 
     # TODO: your real logic
     build_facts_table(df_staging)
-    # build_dim_date(start_date, end_date)
-    # ...
+    build_dim_date(year)
+    build_dim_time()
+    build_dim_location()
+    build_dim_payment()
 
     spark.stop()
 
 
 def build_facts_table(df_staging):
+    # using a hash as surrogate key ensures same input gives same hash, good for changing dims and consistency across pipelines
     df_facts = df_staging \
         .withColumn("trip_id", F.sha2( # use min required columns to uniquely identify a trip
             F.concat_ws(
@@ -81,9 +83,9 @@ def build_facts_table(df_staging):
     print(f"fact_yellow_tripdata written — {df_facts.count()} rows")
     print("")
 
-def build_dim_date(start_date: str, end_date: str, spark: SparkSession):
-    start = datetime.strptime(start_date, "%Y-%m-%d")
-    end = datetime.strptime(end_date, "%Y-%m-%d")
+def build_dim_date(year: str, spark: SparkSession):
+    start = datetime(year, 1, 1)
+    end = datetime(year, 12, 31)
 
     # generate a row per calendar day between start and end
     days = (end - start).days + 1

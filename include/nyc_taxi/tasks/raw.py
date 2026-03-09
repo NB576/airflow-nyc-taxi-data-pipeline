@@ -1,18 +1,18 @@
 from pendulum import datetime
-from include.nyc_taxi.constants import S3_BUCKET, PAYMENT_MAP, RATECODE_MAP
-from include.nyc_taxi.utils import get_storage_options
-from include.nyc_taxi.config import s3_fs, default_conn
-from include.nyc_taxi.helpers import write_table_parquet, write_dataset_parquet
+from include.nyc_taxi.constants import S3_BUCKET, BROWSER_HEADERS
+from include.nyc_taxi.config import s3_fs
 from airflow.models import Connection
 import include.nyc_taxi.errors as errors
-import pyarrow.dataset as ds
 import pandas as pd
-import numpy as np
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+import requests
 
 
-def generate_monthly_dates(start_date, end_date):
+
+def generate_monthly_dates(YEAR):
     months = []
-    current = start_date
+    current = datetime(YEAR, 1, 1)
+    end_date = datetime(YEAR, 12, 1)
     while current <= end_date:
         months.append(current.strftime('%Y-%m'))
         if current.month == 12:
@@ -21,6 +21,34 @@ def generate_monthly_dates(start_date, end_date):
             current = current.replace(month=current.month + 1)
     
     return months
+
+def generate_url(year_month):
+            url = f"https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_{year_month}.parquet"
+       
+            response = requests.head(url=url, headers=BROWSER_HEADERS)
+            print(url, response.status_code)
+            if response.status_code == 200:
+               return url
+            
+            raise ValueError(f"resource unavailable for {year_month}")
+
+def upload_to_s3(year_month, url):
+    s3_hook = S3Hook("aws_default")
+    split = year_month.split("-")
+    key = f"raw/{split[0]}/{split[1]}/yellow_tripdata_{year_month}.parquet"
+    
+    if not s3_hook.check_for_key(key=key, bucket_name=S3_BUCKET):
+        response = requests.get(url, stream=True)
+        response.raw.decode_content = True #ensures decompression
+        s3_hook.load_file_obj(  # Streams response.raw directly to S3
+            file_obj=response.raw,
+            key=key,
+            bucket_name=S3_BUCKET,
+            replace=True)
+    else:
+        print("")
+        print(f"{key} already present in bucket {S3_BUCKET}")
+        print("")
 
 def run_data_quality_checks(year_month: str, 
                             min_rows: int = 10000, 
@@ -76,12 +104,12 @@ def run_data_quality_checks(year_month: str,
     
     # data type check on required columns
     expected_dtypes = {
-        'tpep_pickup_datetime': 'datetime64[ns]',
-        'tpep_dropoff_datetime': 'datetime64[ns]',
+        'tpep_pickup_datetime': 'datetime64[us]',
+        'tpep_dropoff_datetime': 'datetime64[us]',
         'passenger_count': 'float64',
-        'trip_distance': 'float32',
-        'fare_amount': 'float32',
-        'total_amount': 'float32',
+        'trip_distance': 'float64',
+        'fare_amount': 'float64',
+        'total_amount': 'float64',
         'PULocationID': 'int32',
         'DOLocationID': 'int32'
     }
@@ -105,6 +133,7 @@ def run_data_quality_checks(year_month: str,
     pickup_col = "tpep_pickup_datetime"
     dropoff_col = "tpep_dropoff_datetime"
 
+    # pickup/dropoff no null check - required as multiple columns use them to calculate values.    
     # convert columns to datetime format, non conforming entries set to na to give correct null count
     df[pickup_col] = pd.to_datetime(df[pickup_col], errors="coerce")
     df[dropoff_col] = pd.to_datetime(df[dropoff_col], errors="coerce")
@@ -119,7 +148,8 @@ def run_data_quality_checks(year_month: str,
 
     # negative trip duration check
     df["trip_duration_minutes"] = (df[dropoff_col] - df[pickup_col]).dt.total_seconds() / 60
-    neg_duration_count = len(df[df["trip_duration_seconds"] < 0])   
+    # sum() more memory efficient than using len() which creates filtered copy of df
+    neg_duration_count = (df["trip_duration_minutes"] < 0).sum() 
     neg_duration_pct = neg_duration_count / file_row_count if file_row_count else 0
 
     # raise error if neg duration threshold exceeded
