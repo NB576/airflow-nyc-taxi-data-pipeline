@@ -31,7 +31,7 @@ def nyc_taxi():
         def upload_to_bucket(url, year_month):
             upload_to_s3(year_month, url)
         
-        # check whether data is within acceptability thresholds to proceed
+        # checks data quality in raw/ folder 
         @task
         def quality_check_raw_data(year_month):
             return run_data_quality_checks(year_month)
@@ -63,12 +63,24 @@ def nyc_taxi():
             "AWS_SECRET_ACCESS_KEY": conn.password,
         },
         conf={
-            # Overrides the default S3A auth order with AWS SDK's official sequence of credential sources
-            # (environment vars checked first)
-            "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
-            "spark.executor.memory": "4g",
-            "spark.sql.adaptive.enabled": "true", 
-            "spark.sql.adaptive.coalescePartitions.enabled": "true"
+        "spark.master": "local[4]",
+        #Let Spark's memory manager handle the internal memory division between driver and executor
+        "spark.driver.memory": "5g", 
+        # caps result collection — kept low as pipeline has no collect/count operations
+        "spark.driver.maxResultSize": "2g",
+        # Overrides the default S3A auth order with AWS SDK's official sequence of credential sources so that env vars checked first
+        "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
+        # stream data as its generated instead of buffering it all first
+        "spark.hadoop.fs.s3a.fast.upload": "true",
+        # use disk as upload buffer instead of RAM (required due to local machine resource constraints)
+        "spark.hadoop.fs.s3a.fast.upload.buffer": "disk",
+        # uploads in 100MB chunks — more reliable than one giant upload
+        "spark.hadoop.fs.s3a.multipart.size": "104857600",
+        # allows more concurrent S3 connections for faster parallel writes
+        "spark.hadoop.fs.s3a.connection.maximum": "100",
+        # optimise query performance using spark adaptive sql
+        "spark.sql.adaptive.enabled": "true",
+        "spark.sql.adaptive.coalescePartitions.enabled": "true"
         }
     )
 
@@ -84,19 +96,24 @@ def nyc_taxi():
             "AWS_SECRET_ACCESS_KEY": conn.password,
         },
         conf={
-            # Overrides the default S3A auth order with AWS SDK's official sequence of credential sources
-            # (environment vars checked first)
-            "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
-            "spark.executor.memory": "4g",
-            "spark.sql.adaptive.enabled": "true", 
-            "spark.sql.adaptive.coalescePartitions.enabled": "true"
+        "spark.master": "local[4]",
+        "spark.driver.memory": "5g",
+        "spark.driver.maxResultSize": "1g",
+        "spark.sql.sources.partitionOverwriteMode": "dynamic",
+        "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
+        "spark.hadoop.fs.s3a.fast.upload": "true",
+        "spark.hadoop.fs.s3a.fast.upload.buffer": "disk",
+        "spark.hadoop.fs.s3a.multipart.size": "104857600",
+        "spark.hadoop.fs.s3a.connection.maximum": "100",
+        "spark.sql.adaptive.enabled": "true",
+        "spark.sql.adaptive.coalescePartitions.enabled": "true"
         }
     )
 
     year_month_list_task = get_monthly_dates()
     raw_to_staging_taskgroup = raw_to_staging.expand(year_month=year_month_list_task)
 
-    raw_to_staging_taskgroup 
+    raw_to_staging_taskgroup >> staging_transform
     # >> staging_transform >> curated_transform 
         
 nyc_taxi()
