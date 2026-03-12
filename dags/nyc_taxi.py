@@ -64,11 +64,11 @@ def nyc_taxi():
         },
         conf={
         "spark.master": "local[4]",
-        #Let Spark's memory manager handle the internal memory division between driver and executor
+        # let Spark's memory manager handle the internal memory division between driver and executor
         "spark.driver.memory": "5g", 
         # caps result collection — kept low as pipeline has no collect/count operations
         "spark.driver.maxResultSize": "2g",
-        # Overrides the default S3A auth order with AWS SDK's official sequence of credential sources so that env vars checked first
+        # overrides the default S3A auth order with AWS SDK's official sequence of credential sources so that env vars checked first
         "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
         # stream data as its generated instead of buffering it all first
         "spark.hadoop.fs.s3a.fast.upload": "true",
@@ -95,10 +95,10 @@ def nyc_taxi():
             "AWS_ACCESS_KEY_ID": conn.login,
             "AWS_SECRET_ACCESS_KEY": conn.password,
         },
-        conf={
+        conf={ # same conf as staging spark operator
         "spark.master": "local[4]",
         "spark.driver.memory": "5g",
-        "spark.driver.maxResultSize": "1g",
+        "spark.driver.maxResultSize": "2g",
         "spark.sql.sources.partitionOverwriteMode": "dynamic",
         "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain",
         "spark.hadoop.fs.s3a.fast.upload": "true",
@@ -113,9 +113,8 @@ def nyc_taxi():
     year_month_list_task = get_monthly_dates()
     raw_to_staging_taskgroup = raw_to_staging.expand(year_month=year_month_list_task)
 
-    raw_to_staging_taskgroup >> staging_transform
-    # >> staging_transform >> curated_transform 
-        
+    raw_to_staging_taskgroup >> staging_transform >> curated_transform 
+           
 nyc_taxi()
    
 
