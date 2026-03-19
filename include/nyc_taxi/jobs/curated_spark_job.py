@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 def build_facts_table(df_staging, spark: SparkSession):
-    # required when writing in override mode and also partitioning table in multiple iterations
+    # required (fact table only) when writing in override mode and also partitioning table in multiple iterations
     spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")  
 
     # using a hash as surrogate key ensures same input gives same hash, good for changing dims and consistency across pipelines
@@ -75,7 +75,7 @@ def build_dim_date(spark: SparkSession, year: int):
     days = (end_date - start_date).days + 1
     date_df = spark.range(days) \
         .withColumn("full_date", F.date_add(F.lit(start_date), F.col("id").cast(IntegerType()))) \
-        .withColumn("date_id", F.col("id").cast(IntegerType())) \
+        .withColumn("date_key", F.col("id").cast(IntegerType()) + 1 ) \
         .withColumn("year", F.year("full_date").cast(IntegerType())) \
         .withColumn("quarter", F.quarter("full_date").cast(IntegerType())) \
         .withColumn("month", F.month("full_date").cast(IntegerType())) \
@@ -127,7 +127,7 @@ def build_dim_payment(spark: SparkSession):
 def build_dim_time(spark: SparkSession):
     rows = []
     for h in range(24):
-        for d in range(7):
+        for d in range(8):
             time_key = h * 100 + d * 10 # puts h in hundreds pos and d in tens pos ie 940 is 9am thursday
             part_of_day = (
                 "Morning" if h < 12 else \
@@ -154,6 +154,10 @@ def main(year: str):
     print(f"Reading staging data for year {year}...")
     print("")
 
+    """
+    Note: Data is processed month by month due to local development memory constraints. 
+    In a production environment on a properly sized cluster, the full dataset would be processed in a single pass.
+    """
     for month in range(1, 13):
         print(f"Building facts_df for month {month}")
         df_staging = spark.read.parquet(f"s3a://{S3_BUCKET}/staging/") \
