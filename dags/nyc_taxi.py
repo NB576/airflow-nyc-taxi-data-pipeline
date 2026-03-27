@@ -10,7 +10,7 @@ from pathlib import Path
 
 @dag(
     start_date=datetime(2025, 1, 1),
-    schedule='0 0 1 * *',
+    schedule=None,
     catchup=False,
     description=''
 )

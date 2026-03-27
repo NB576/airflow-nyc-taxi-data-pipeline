@@ -4,7 +4,7 @@ S3_BUCKET = "nyc-taxi-project-112025"
 
 YEAR = 2024
 
-MIN_ROWS_PER_MONTH = 100_000
+CURATED_MIN_ROWS_PER_MONTH = 100_000
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
