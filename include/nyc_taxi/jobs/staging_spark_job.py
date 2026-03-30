@@ -1,18 +1,18 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import ShortType, FloatType
+from pyspark.sql.types import ShortType, FloatType, IntegerType
 from datetime import datetime
 from include.nyc_taxi.jobs import helpers
-from include.nyc_taxi.constants import PAYMENT_MAP, RATECODE_MAP, S3_BUCKET, YEAR
+from include.nyc_taxi.constants import PAYMENT_MAP, RATECODE_MAP, S3_BUCKET
 
-def staging_transform(df_raw, year: int):
+def staging_transform(df_raw, year: int, month: int):
 
      # convert pickup, dropoff date columns to timestamp and then drop null rows
     df_staging = df_raw \
         .withColumn("tpep_pickup_datetime", F.to_timestamp("tpep_pickup_datetime")) \
         .withColumn("tpep_dropoff_datetime", F.to_timestamp("tpep_dropoff_datetime")) \
         .dropna(subset=["tpep_pickup_datetime", "tpep_dropoff_datetime"])
-    
+
     # add additional columns required for filtering
     df_staging = df_staging \
         .withColumn("trip_duration_minutes", (F.col("tpep_dropoff_datetime").cast("long") - F.col("tpep_pickup_datetime").cast("long")) / 60) \
@@ -29,7 +29,9 @@ def staging_transform(df_raw, year: int):
         (F.col("trip_duration_minutes").between(1, 120)) &
         (F.col("PULocationID").between(1, 265)) &
         (F.col("DOLocationID").between(1, 265)) &
-        (F.col("year") == year)
+        (F.col("year") == year) &
+        (F.col("month") == month)
+
     )
 
     # add additional time based columns
@@ -40,10 +42,10 @@ def staging_transform(df_raw, year: int):
     
     # add additional monetary ratio and revenue columns
     df_staging = df_staging \
-        .withColumn("tip_rate", F.col("tip_amount") / F.col("fare_amount")) \
-        .withColumn("fare_per_mile", F.col("fare_amount") / F.col("trip_distance")) \
-        .withColumn("fare_per_minute", F.col("fare_amount") / F.col("trip_duration_minutes")) \
-        .withColumn("revenue", F.col("fare_amount") + F.col("extra") + F.col("tip_amount"))
+    .withColumn("tip_rate", F.when(F.col("fare_amount") != 0, F.col("tip_amount") / F.col("fare_amount")).otherwise(None)) \
+    .withColumn("fare_per_mile", F.when(F.col("trip_distance") != 0, F.col("fare_amount") / F.col("trip_distance")).otherwise(None)) \
+    .withColumn("fare_per_minute", F.when(F.col("trip_duration_minutes") != 0, F.col("fare_amount") / F.col("trip_duration_minutes")).otherwise(None)) \
+    .withColumn("revenue", F.col("fare_amount") + F.col("extra") + F.col("tip_amount"))
     
     # categorical enrichment
     df_staging = df_staging \
@@ -51,23 +53,39 @@ def staging_transform(df_raw, year: int):
         .withColumn("rate_code_name", helpers.map_col(mapping=RATECODE_MAP, input_col="RatecodeID"))
     
     # enrich with trip efficiency measure column
-    df_staging = df_staging.withColumn("avg_speed_mph", F.col("trip_distance") / (F.col("trip_duration_minutes") / 60))
+    df_staging = df_staging.withColumn("avg_speed_mph", F.when(F.col("trip_duration_minutes") != 0, F.col("trip_distance") / (F.col("trip_duration_minutes") / 60)).otherwise(None))
+
+    # create identifer column trip id and drop duplicates
+    df_staging = df_staging.withColumn("trip_id", F.sha2( # use min required columns to uniquely identify a trip
+                    F.concat_ws(
+                    "||",
+                    F.coalesce(F.col("VendorID").cast("string"), F.lit("NULL")),
+                    F.coalesce(F.col("tpep_pickup_datetime").cast("string"), F.lit("NULL")),
+                    F.coalesce(F.col("tpep_dropoff_datetime").cast("string"), F.lit("NULL")),
+                    F.coalesce(F.col("PULocationID").cast("string"), F.lit("NULL")),
+                    F.coalesce(F.col("DOLocationID").cast("string"), F.lit("NULL")),
+                    F.coalesce(F.col("RatecodeID").cast("string"), F.lit("NULL")),
+                    F.coalesce(F.col("payment_type").cast("string"), F.lit("NULL"))),
+                256))
+
+    df_staging = df_staging.dropDuplicates(["trip_id"])
 
     # final staging df column selection, casting to respective types
     df_staging = df_staging.select(
-        F.col("VendorID").cast(ShortType()),
+        F.col("trip_id"),
+        F.col("VendorID").cast(IntegerType()),
         F.col("tpep_pickup_datetime"),
         F.col("tpep_dropoff_datetime"),
-        F.col("pickup_hour").cast(ShortType()),
-        F.col("pickup_dayofweek").cast(ShortType()),
-        F.col("pickup_weekend").cast(ShortType()),
-        F.col("passenger_count").cast(ShortType()),
+        F.col("pickup_hour").cast(IntegerType()),
+        F.col("pickup_dayofweek").cast(IntegerType()),
+        F.col("pickup_weekend").cast(IntegerType()),
+        F.col("passenger_count").cast(IntegerType()),
         F.col("trip_distance").cast(FloatType()),
-        F.col("PULocationID").cast(ShortType()),
-        F.col("DOLocationID").cast(ShortType()),
-        F.col("RatecodeID").cast(ShortType()),
+        F.col("PULocationID").cast(IntegerType()),
+        F.col("DOLocationID").cast(IntegerType()),
+        F.col("RatecodeID").cast(IntegerType()),
         F.col("rate_code_name"),
-        F.col("payment_type").cast(ShortType()),
+        F.col("payment_type").cast(IntegerType()),
         F.col("payment_type_name"),
         F.col("fare_amount").cast(FloatType()),
         F.col("extra").cast(FloatType()),
@@ -81,15 +99,15 @@ def staging_transform(df_raw, year: int):
         F.col("trip_duration_minutes").cast(FloatType()),
         F.col("avg_speed_mph").cast(FloatType()),
         F.col("revenue").cast(FloatType()),
-        F.col("year").cast(ShortType()),
-        F.col("month").cast(ShortType()),
+        F.col("year").cast(IntegerType()),
+        F.col("month").cast(IntegerType()),
     )
 
     # partitionBy required (even though processing one month's data at a time) to facilitate read efficiency
-    df_staging.write.mode("append") \
+    df_staging.write.mode("overwrite") \
         .partitionBy("year", "month") \
-        .parquet(f"s3a://{S3_BUCKET}/staging/"
-    )
+        .parquet(f"s3a://{S3_BUCKET}/staging/")
+
 
 
 def main(year: str):
@@ -101,7 +119,7 @@ def main(year: str):
         print("")
         print(f"Processing {year}/{month}...")
         df_raw = spark.read.parquet(f"s3a://{S3_BUCKET}/raw/{year}/{month:02d}/")
-        staging_transform(df_raw, int(year))
+        staging_transform(df_raw, int(year), month)
         print(f"Completed staging transform for {year}/{month}")
         print("")
 
