@@ -9,16 +9,15 @@ airflow-webserver.pid
 webserver_config.py
 airflow.cfg
 airflow.db
-
 upgrade-test* 
 notes/
 Dockerfile_annotated
 dags/nyc_taxi_annotated.py
 include/nyc_taxi/jobs/annotated/
 include/nyc_taxi/output/
-
 .terraform/
 terraform.tfstate
 terraform.tfstate.backup
 *.tfvars
 crash.log
+superset/

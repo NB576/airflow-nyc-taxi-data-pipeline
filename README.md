@@ -12,6 +12,7 @@ An end to end data pipeline that ingests NYC yellow taxi trip data from the TLC 
 - [Design Decisions](#design-decisions)
 - [Setup Instructions](#setup-instructions)
 - [Known Limitations](#known-limitations)
+- [Dashboard](#dashboard)
 - [Future Enhancements](#future-enhancements)
 
 ---
@@ -46,9 +47,9 @@ NYC TLC Public Dataset
          │
          ▼
 ┌───────────────────┐
-│   BI Layer        │  (Planned — see Future Enhancements)
-│  AWS Athena +     │
-│  Superset         │
+│   BI Layer        │  AWS Athena queries curated parquet files
+│  AWS Athena +     │  Apache Superset dashboards
+│  Superset         │  Trip volume, revenue, location analysis
 └───────────────────┘
 ```
 
@@ -82,6 +83,9 @@ dim_location ──── fact_yellow_tripdata ──── dim_payment
 | **Astronomer CLI** | Local Airflow development environment |
 | **Apache Spark (PySpark)** | Distributed data transformation |
 | **AWS S3** | Data lake storage across all medallion layers |
+| **AWS Athena** | Serverless SQL query engine over S3 parquet files |
+| **AWS Glue** | Data catalog — schema registry for Athena tables |
+| **Apache Superset** | BI and dashboard layer |
 | **Terraform** | Infrastructure as code — AWS environment provisioning |
 | **Docker** | Containerised local development |
 | **Python** | Pipeline logic, data quality checks, helper utilities |
@@ -130,6 +134,14 @@ Validates the curated layer before it is consumed downstream:
 - Referential integrity — all foreign keys in facts exist in dimension tables
 - Row count threshold — catches silent pipeline failures
 - Cross month duplicate detection
+
+### 5. BI Layer — AWS Athena + Apache Superset
+
+The curated star schema is queryable via AWS Athena and visualised in Apache Superset:
+
+- **AWS Glue crawlers** scan the curated S3 parquet files and register table schemas in the Glue Data Catalog
+- **AWS Athena** queries the parquet files directly using standard SQL via the Glue catalog
+- **Apache Superset** connects to Athena and provides interactive dashboards covering trip volume trends, revenue analysis, and pickup/dropoff location patterns
 
 ---
 
@@ -241,20 +253,50 @@ S3_BUCKET=nyc-taxi-project-112025
 YEAR=2024
 ```
 
-### 5. Start Airflow
+### 5. Build the Superset image
+
+Superset requires a custom Docker image with the PyAthena driver pre-installed. This only needs to be run once, or whenever `Dockerfile.superset` changes:
+
+```bash
+docker-compose -f docker-compose.override.yml build
+```
+
+### 6. Start Airflow and Superset
+
+Astronomer CLI merges `docker-compose.override.yml` automatically — a single command starts both Airflow and Superset:
 
 ```bash
 astro dev start
 ```
 
-### 6. Configure Airflow connections
+Access the UIs at:
+- **Airflow**: `http://localhost:8080` (username: `admin`, password: `admin`)
+- **Superset**: `http://localhost:8088` (username: `admin`, password: `admin`)
+
+### 7. Configure Airflow connections
 
 In the Airflow UI (`http://localhost:8080`):
 
 - Add connection `aws_default` with your AWS credentials
 - Add connection `spark_default` with master set to `local[4]`
 
-### 7. Trigger the DAG
+### 8. Connect Superset to Athena
+
+In the Superset UI (`http://localhost:8088`):
+
+```
+Settings → Database Connections → + Database → Amazon Athena
+```
+
+Enter the connection string:
+
+```
+awsathena+rest://YOUR_ACCESS_KEY:YOUR_SECRET_KEY@athena.us-east-1.amazonaws.com/nyc_taxi?s3_staging_dir=s3://nyc-taxi-project-112025/athena-results/&work_group=nyc-taxi
+```
+
+Click **Test Connection** to verify, then click **Connect**.
+
+### 9. Trigger the DAG
 
 In the Airflow UI, enable the `nyc_taxi` DAG and trigger it manually. The pipeline is designed to be triggered on demand for a given year rather than run on a schedule — update the `YEAR` constant in `constants.py` before triggering.
 
@@ -266,14 +308,29 @@ In the Airflow UI, enable the `nyc_taxi` DAG and trigger it manually. The pipeli
 
 **Local development memory constraints** — processing is done month by month due to the memory available in a local Docker environment. On a production cluster with adequate memory, the full dataset would be processed in a single pass with significantly better performance.
 
-**No BI layer** — the curated star schema is ready for BI consumption but a dashboard has not yet been implemented. See Future Enhancements below.
+---
+
+## Dashboards
+
+### NYC Yellow Taxi Trips - Overview 
+![NYC Yellow Taxi Trips - Overview](docs/screenshots/nyc-taxi-trips-2024-overview.jpg)
+
+### NYC Yellow Taxi Trips - Payment Revenue Analysis
+![NYC Yellow Taxi Trips - Payment Revenue Analysis](docs/screenshots/nyc-yellow-taxi-trips-2024-payment-revenue-analysis.jpg)
+
+### NYC Yellow Taxi Trips - Overview - Monthly Filter
+
+![NYC Yellow Taxi Trips - Overview - Monthly Filter](docs/gifs/Dashboard-Monthly-Filter.gif)
+
+### NYC Yellow Taxi Trips - Payment Revenue Analysis - Monthly Filter
+
+![NYC Yellow Taxi Trips - Payment Revenue Analysis - Monthly Filter](docs/gifs/Payment-Revenue-Analysis-Filter.gif)
 
 ---
 
 ## Future Enhancements
 
-- **BI Dashboard** — connect AWS Athena to query the curated parquet files and build dashboards in Apache Superset covering trip volume trends, fare analysis, and pickup/dropoff location patterns
-- **AWS Certification** — migrate from local Spark to AWS Glue or EMR for scalable cloud-native processing
+- **Cloud-native processing** — migrate from local Spark to AWS Glue or EMR for scalable cloud-native processing
 - **dbt integration** — replace curated Spark transforms with dbt models for better SQL-based lineage and testing
 - **Multi-year support** — extend the pipeline to process multiple years with a date range argument
 - **Schema validation** — add explicit schema validation checks at each medallion layer boundary
