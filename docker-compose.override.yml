@@ -1,0 +1,20 @@
+
+services:
+  superset:
+    build:
+      context: .
+      dockerfile: Dockerfile.superset
+    image: superset-nyc-taxi:latest 
+    container_name: superset
+    ports:
+      - "8088:8088"
+    environment:
+      - SUPERSET_SECRET_KEY=your_secret_key
+    volumes:
+      - ./superset:/app/superset_home
+    networks:
+      - nyc-taxi-airflow_549074_airflow
+
+networks:
+  nyc-taxi-airflow_549074_airflow:
+    external: true
