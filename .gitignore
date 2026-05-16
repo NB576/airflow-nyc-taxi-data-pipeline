@@ -21,3 +21,4 @@ terraform.tfstate.backup
 *.tfvars
 crash.log
 superset/
+logs/

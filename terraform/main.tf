@@ -65,7 +65,7 @@ resource "aws_s3_object" "athena_results_folder" {
 }
 
 # ─────────────────────────────────────────────
-# ATHENA
+# Athena
 # ─────────────────────────────────────────────
 
 # workgroup to configure where Athena stores query results
@@ -88,6 +88,45 @@ resource "aws_glue_catalog_database" "nyc_taxi" {
     name = "nyc_taxi"
 }
 
+resource aws_glue_catalog_table "fact_yellow_tripdata" {
+    name          = "fact_yellow_tripdata"
+    database_name = aws_glue_catalog_database.nyc_taxi.name
+    table_type    = "EXTERNAL_TABLE" # data is stored outside of Glue (s3) metadata stored in Glue Data Catalog
+    
+    # required - defines how the data is stored in S3 and how to read it
+    storage_descriptor {
+        location      = "s3://${aws_s3_bucket.data_bucket.bucket}/curated/fact_yellow_tripdata/"
+        input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+        output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+        ser_de_info {
+            serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+        }
+    }
+
+    # manage partition keys to ensure type is set to int (after terraform apply) as crawler defaults to string
+    partition_keys {
+      name = "year"
+      type = "int"
+    }
+    partition_keys {
+        name = "month"
+        type = "int"
+    }
+
+
+    lifecycle {
+      # This prevents Terraform from overwriting crawler-driven changes to columns
+      ignore_changes = [ 
+        storage_descriptor[0].columns,
+        # ignore changes to the number_of_buckets, compressed flags which is sometimes changed when crawler runs 
+        # which leads to phantom drift issue which terraform attempts to fix on every apply
+        storage_descriptor[0].number_of_buckets,
+        storage_descriptor[0].compressed
+       ]
+    }
+}
+
 # ─────────────────────────────────────────────
 # IAM ROLE FOR GLUE CRAWLER
 # ─────────────────────────────────────────────
@@ -97,7 +136,7 @@ resource "aws_iam_role" "glue_crawler_role" {
     name = "nyc-taxi-glue-crawler-role"
 
   # Trust policy that specifies who (glue.amazonaws.com) can assume this role 
-  # and what actions they can perform (sts:AssumeRole) when they do
+  # and what actions they can perform when they do
     assume_role_policy = jsonencode({
         Version = "2012-10-17"
         Statement = [{
@@ -150,13 +189,27 @@ resource "aws_glue_crawler" "fact_yellow_tripdata" {
         path = "s3://${aws_s3_bucket.data_bucket.bucket}/curated/fact_yellow_tripdata/"
     }
 
+    schema_change_policy {
+        # is default but specified explicitly to avoid accidental changes to table schema from crawler runs
+        update_behavior = "UPDATE_IN_DATABASE"  
+        delete_behavior = "LOG"
+    }
+
     # tells crawler to infer partitions from year=/month= folder structure
     configuration = jsonencode({
         Version = 1.0
         CrawlerOutput = {
             Partitions = { AddOrUpdateBehavior = "InheritFromTable" }
         }
+        Grouping = {
+            TableGroupingPolicy     = "CombineCompatibleSchemas"
+            TableLevelConfiguration = 3  # treat everything under this path as one table
+            # s3://bucket/curated/fact_yellow_tripdata/year=2024/month=1/file.parquet
+            #    level 1  level 2     level 3             level 4
+        }
     })
+
+    
 }
 
 # crawler for dim_date

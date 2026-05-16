@@ -15,7 +15,7 @@ class SchemaValidationError(DataQualityError):
 class NonNullColumnError(DataQualityError):
     """Raised when pickup or dropoff columns contain a null value"""
     def __init__(self, col: str, null_count: int):
-        super().__init(f"Non null column {col} contains {null_count} nulls")
+        super().__init__(f"Non null column {col} contains {null_count} nulls")
 
 class NullThresholdError(DataQualityError):
     """Raised when null percentage exceeds threshold for a column"""

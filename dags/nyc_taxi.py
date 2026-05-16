@@ -2,7 +2,8 @@ from airflow.decorators import dag, task, task_group
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.hooks.base import BaseHook
 from include.nyc_taxi.tasks.raw import generate_url, upload_to_s3, generate_monthly_dates, run_data_quality_checks
-from include.nyc_taxi.constants import S3_BUCKET, BROWSER_HEADERS, YEAR, SPARK_CONF
+from include.nyc_taxi.constants import YEAR
+from include.nyc_taxi.config.spark import SPARK_CONF
 from pendulum import datetime
 from datetime import timedelta
 
@@ -31,13 +32,10 @@ def nyc_taxi():
         def upload_to_bucket(url, year_month):
             upload_to_s3(year_month, url)
         
-        # checks data quality in raw/ folder 
         @task
         def quality_check_raw_data(year_month):
             return run_data_quality_checks(year_month)
         
-
-        #link tasks in taskgroup 
         url_task = get_url(year_month)
         upload_task = upload_to_bucket(url_task, year_month)
         quality_check_task = quality_check_raw_data(year_month)

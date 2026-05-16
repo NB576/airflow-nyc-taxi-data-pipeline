@@ -1,6 +1,7 @@
 from pendulum import datetime
-from include.nyc_taxi.constants import S3_BUCKET, BROWSER_HEADERS
-from include.nyc_taxi.config import s3_fs
+from include.nyc_taxi.constants import S3_BUCKET
+from include.nyc_taxi.config.http import BROWSER_HEADERS
+from include.nyc_taxi.config.aws import s3_fs
 from airflow.models import Connection
 import include.nyc_taxi.errors as errors
 import pandas as pd
