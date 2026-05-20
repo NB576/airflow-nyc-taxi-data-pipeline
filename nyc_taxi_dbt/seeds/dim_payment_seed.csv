@@ -1,0 +1,7 @@
+payment_key,payment_type_id,payment_type,is_cash
+1,1,Credit Card,0
+2,2,Cash,1
+3,3,No Charge,0
+4,4,Dispute,0
+5,5,Unknown,0
+6,6,Voided Trip,0

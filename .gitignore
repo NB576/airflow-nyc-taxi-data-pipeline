@@ -21,4 +21,5 @@ terraform.tfstate.backup
 *.tfvars
 crash.log
 superset/
+dbt-env/
 logs/

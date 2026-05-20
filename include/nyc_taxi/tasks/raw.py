@@ -10,7 +10,7 @@ import requests
 
 
 
-def generate_monthly_dates(YEAR):
+def get_formatted_monthly_dates(YEAR):
     months = []
     current = datetime(YEAR, 1, 1)
     end_date = datetime(YEAR, 12, 1)

@@ -106,7 +106,7 @@ def staging_transform(df_raw, year: int, month: int):
     # partitionBy required (even though processing one month's data at a time) to facilitate read efficiency
     df_staging.write.mode("overwrite") \
         .partitionBy("year", "month") \
-        .parquet(f"s3a://{S3_BUCKET}/staging/")
+        .parquet(f"s3a://{S3_BUCKET}/stg_yellow_tripdata/")
 
 
 
