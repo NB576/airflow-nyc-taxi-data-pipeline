@@ -1,11 +1,13 @@
 from pendulum import datetime
 from include.nyc_taxi.constants import S3_BUCKET
 from include.nyc_taxi.config.http import BROWSER_HEADERS
-from include.nyc_taxi.config.aws import s3_fs
 from airflow.models import Connection
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.models import Connection
+from s3fs import S3FileSystem
 import include.nyc_taxi.errors as errors
 import pandas as pd
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+
 import requests
 
 
@@ -73,6 +75,14 @@ def run_data_quality_checks(year_month: str,
     month = split[1]
     raw_file_path = f"s3://{S3_BUCKET}/raw/{year}/{month}/yellow_tripdata_{year_month}.parquet"
     s3_key = f"{S3_BUCKET}/raw/{year}/{month}/"
+
+    default_conn = Connection.get_connection_from_secrets('aws_default')
+
+    s3_fs = S3FileSystem(
+        key=default_conn.login,
+        secret=default_conn.password,
+        token=default_conn.extra_dejson.get('session_token')
+    )
 
     # check file existence
     if not s3_fs.exists(raw_file_path):

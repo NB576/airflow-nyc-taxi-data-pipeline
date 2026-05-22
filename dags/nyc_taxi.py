@@ -1,6 +1,8 @@
 from airflow.decorators import dag, task, task_group
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.hooks.base import BaseHook
+from cosmos import DbtTaskGroup, ProjectConfig, ProfileConfig
+from cosmos.profiles import AthenaAccessKeyProfileMapping
 from include.nyc_taxi.tasks.raw import generate_url, upload_to_s3, get_formatted_monthly_dates, run_data_quality_checks
 from include.nyc_taxi.constants import YEAR
 from include.nyc_taxi.config.spark import SPARK_CONF
@@ -62,6 +64,30 @@ def nyc_taxi():
         },
         conf=SPARK_CONF
     )
+
+
+    # curated_dbt_taskgroup = DbtTaskGroup(
+    #     group_id="curated_dbt",
+    #     project_config=ProjectConfig(
+    #         dbt_project_path=str(project_root/"nyc_taxi_dbt"),
+    #     ),
+    #     profile_config=ProfileConfig(
+    #         profile_name="nyc_taxi_dbt",
+    #         target_name="dev",
+    #         profile_mapping=AthenaAccessKeyProfileMapping(
+    #             conn_id="aws_default",
+    #             profile_args={
+    #                 "region_name": "us-east-1",
+    #                 "s3_staging_dir": "s3://nyc-taxi-project-112025/athena-results/",
+    #                 "s3_data_dir": "s3://nyc-taxi-project-112025/curated/",
+    #                 "schema": "nyc_taxi_curated",
+    #             }
+    #         )
+    #     ),
+    #     operator_args={ #TBD: refactor this to allow any two dates to be passed as args (currently hardcoded for full year processing)
+    #         "vars": f'{{"start_date": "{YEAR}-01-01", "end_date": "{YEAR}-12-31"}}'
+    #     },
+    # )
 
 
     year_month_list_task = get_monthly_dates()
