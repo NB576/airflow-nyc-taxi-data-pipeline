@@ -1,8 +1,8 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import ShortType, FloatType, IntegerType
+from include.nyc_taxi.jobs.helpers import map_col
 from datetime import datetime
-from include.nyc_taxi.jobs import helpers
 from include.nyc_taxi.constants import PAYMENT_MAP, RATECODE_MAP, S3_BUCKET
 
 def staging_transform(df_raw, year: int, month: int):
@@ -49,8 +49,8 @@ def staging_transform(df_raw, year: int, month: int):
     
     # categorical enrichment
     df_staging = df_staging \
-        .withColumn("payment_type_name", helpers.map_col(mapping=PAYMENT_MAP, input_col="payment_type")) \
-        .withColumn("rate_code_name", helpers.map_col(mapping=RATECODE_MAP, input_col="RatecodeID"))
+        .withColumn("payment_type_name", map_col(mapping=PAYMENT_MAP, input_col="payment_type")) \
+        .withColumn("rate_code_name", map_col(mapping=RATECODE_MAP, input_col="RatecodeID"))
     
     # enrich with trip efficiency measure column
     df_staging = df_staging.withColumn("avg_speed_mph", F.when(F.col("trip_duration_minutes") != 0, F.col("trip_distance") / (F.col("trip_duration_minutes") / 60)).otherwise(None))
@@ -103,11 +103,10 @@ def staging_transform(df_raw, year: int, month: int):
         F.col("month").cast(IntegerType()),
     )
 
-    # partitionBy required (even though processing one month's data at a time) to facilitate read efficiency
+    # partitionBy required (even though processing one month's data at a time) to facilitate future read efficiency
     df_staging.write.mode("overwrite") \
         .partitionBy("year", "month") \
-        .parquet(f"s3a://{S3_BUCKET}/staging/")
-
+        .parquet(f"s3a://{S3_BUCKET}/stg_yellow_tripdata/")
 
 
 def main(year: str):

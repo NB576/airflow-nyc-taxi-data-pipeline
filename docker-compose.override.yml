@@ -1,4 +1,3 @@
-
 services:
   superset:
     build:
@@ -14,6 +13,11 @@ services:
       - ./superset:/app/superset_home
     networks:
       - nyc-taxi-airflow_549074_airflow
+
+# required as only include/ is mounted automatically
+  scheduler:
+    volumes:
+      - ./nyc_taxi_dbt:/usr/local/airflow/nyc_taxi_dbt
 
 networks:
   nyc-taxi-airflow_549074_airflow:

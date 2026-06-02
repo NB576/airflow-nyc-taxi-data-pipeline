@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: silver
+    database: awsdatacatalog
+    schema: nyc_taxi_staging
+    tables:
+      - name: stg_yellow_tripdata
+        description: "Cleaned and enriched nyc taxi trip records from staging (silver) layer"

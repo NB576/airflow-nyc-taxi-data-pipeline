@@ -1,9 +1,7 @@
-from include.nyc_taxi.constants import S3_BUCKET, PAYMENT_MAP, RATECODE_MAP
-from include.nyc_taxi.config.aws import s3_fs, default_conn
-from include.nyc_taxi.helpers import write_table_parquet, write_dataset_parquet
+from include.nyc_taxi.constants import S3_BUCKET, PAYMENT_MAP
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import IntegerType, FloatType
+from pyspark.sql.types import IntegerType
 from datetime import datetime
 
 

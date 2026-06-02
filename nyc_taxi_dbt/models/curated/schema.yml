@@ -1,0 +1,81 @@
+version: 2
+
+models:
+  - name: fact_yellow_tripdata
+    description: "Trip level facts — fares, distances, durations"
+    columns:
+      - name: trip_id
+        description: "SHA256 surrogate key — uniquely identifies a trip"
+        tests:
+          - unique
+          - not_null
+      - name: pickup_location_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_location')
+                field: location_key
+      - name: dropoff_location_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_location')
+                field: location_key
+      - name: payment_type_id
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_payment')
+                field: payment_key
+
+  - name: dim_location
+    description: "NYC taxi zone lookup — borough and zone name"
+    columns:
+      - name: location_key
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_payment
+    description: "Payment type mapping with cash flag"
+    columns:
+      - name: payment_key
+        tests:
+          - unique
+          - not_null
+      - name: payment_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['Credit Card', 'Cash', 'No Charge', 'Dispute', 'Unknown', 'Voided Trip']
+      - name: is_cash
+        tests:
+          - accepted_values:
+              values: [0, 1]
+              quote: false
+
+  - name: dim_date
+    description: "Calendar attributes for the configured date range"
+    columns:
+      - name: date_key
+        tests:
+          - unique
+          - not_null
+      - name: weekend
+        tests:
+          - accepted_values:
+              values: [0, 1]
+              quote: false
+
+
+  - name: dim_time
+    description: "Hour and day of week combinations with part of day label"
+    columns:
+      - name: time_key
+        tests:
+          - unique
+          - not_null
+      - name: part_of_day
+        tests:
+          - accepted_values:
+                values: ['Morning', 'Afternoon', 'Evening', 'Night']
