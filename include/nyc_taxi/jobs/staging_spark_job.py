@@ -103,15 +103,11 @@ def staging_transform(df_raw, year: int, month: int):
         F.col("month").cast(IntegerType()),
     )
 
-    # partitionBy required (even though processing one month's data at a time) to facilitate read efficiency
-    # df_staging.write.mode("overwrite") \
-    #     .partitionBy("year", "month") \
-    #     .parquet(f"s3a://{S3_BUCKET}/stg_yellow_tripdata/")
-
-    # partitionBy required (even though processing one month's data at a time) to facilitate read efficiency
+    # partitionBy required (even though processing one month's data at a time) to facilitate future read efficiency
     df_staging.write.mode("overwrite") \
         .partitionBy("year", "month") \
-        .parquet(LOCAL_OUTPUT_DIR)
+        .parquet(f"s3a://{S3_BUCKET}/stg_yellow_tripdata/")
+
 
 def main(year: str):
     spark = SparkSession.builder \

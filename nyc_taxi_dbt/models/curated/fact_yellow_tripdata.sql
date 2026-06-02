@@ -1,3 +1,7 @@
+{{ config(
+    partitioned_by=['year', 'month']
+) }}
+
 select
     -- surrogate key
     to_hex(md5(to_utf8(concat_ws('||',

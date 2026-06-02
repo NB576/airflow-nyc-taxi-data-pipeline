@@ -66,34 +66,35 @@ def nyc_taxi():
     )
 
 
-    # curated_dbt_taskgroup = DbtTaskGroup(
-    #     group_id="curated_dbt",
-    #     project_config=ProjectConfig(
-    #         dbt_project_path=str(project_root/"nyc_taxi_dbt"),
-    #     ),
-    #     profile_config=ProfileConfig(
-    #         profile_name="nyc_taxi_dbt",
-    #         target_name="dev",
-    #         profile_mapping=AthenaAccessKeyProfileMapping(
-    #             conn_id="aws_default",
-    #             profile_args={
-    #                 "region_name": "us-east-1",
-    #                 "s3_staging_dir": "s3://nyc-taxi-project-112025/athena-results/",
-    #                 "s3_data_dir": "s3://nyc-taxi-project-112025/curated/",
-    #                 "schema": "nyc_taxi_curated",
-    #             }
-    #         )
-    #     ),
-    #     operator_args={ #TBD: refactor this to allow any two dates to be passed as args (currently hardcoded for full year processing)
-    #         "vars": f'{{"start_date": "{YEAR}-01-01", "end_date": "{YEAR}-12-31"}}'
-    #     },
-    # )
+    curated_dbt_taskgroup = DbtTaskGroup(
+        group_id="curated_dbt",
+        project_config=ProjectConfig(
+            dbt_project_path=str(project_root/"nyc_taxi_dbt"),
+        ),
+        profile_config=ProfileConfig(
+            profile_name="nyc_taxi_dbt",
+            target_name="dev",
+            profile_mapping=AthenaAccessKeyProfileMapping(
+                conn_id="aws_default",
+                profile_args={
+                    "region_name": "us-east-1",
+                    "s3_staging_dir": "s3://nyc-taxi-project-112025/athena-results/",
+                    "s3_data_dir": "s3://nyc-taxi-project-112025/curated/",
+                    "schema": "nyc_taxi_curated",
+                    "database": "awsdatacatalog",
+                }
+            )
+        ),
+        operator_args={ #TBD: refactor this to allow any two dates to be passed as args (currently hardcoded for full year processing)
+            "vars": f'{{"start_date": "{YEAR}-01-01", "end_date": "{YEAR}-12-31"}}'
+        },
+    )
 
 
     year_month_list_task = get_monthly_dates()
     raw_to_staging_taskgroup = raw_to_staging.expand(year_month=year_month_list_task)
 
-    raw_to_staging_taskgroup >> staging_transform
+    raw_to_staging_taskgroup >> staging_transform >> curated_dbt_taskgroup
 
 nyc_taxi()
    

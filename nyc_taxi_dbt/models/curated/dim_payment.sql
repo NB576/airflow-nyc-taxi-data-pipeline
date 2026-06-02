@@ -3,4 +3,4 @@ select
     payment_key,
     payment_type,
     is_cash
-from {{ ref('dim_payment_seed') }}
+from {{ ref('payment') }}

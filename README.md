@@ -12,6 +12,7 @@ An end to end data pipeline that ingests NYC yellow taxi trip data from the TLC 
 - [Design Decisions](#design-decisions)
 - [Setup Instructions](#setup-instructions)
 - [Known Limitations](#known-limitations)
+- [dbt Lineage](#dbt-lineage)
 - [Dashboard](#dashboard)
 - [Future Enhancements](#future-enhancements)
 
@@ -33,16 +34,18 @@ NYC TLC Public Dataset
          │
          ▼
 ┌───────────────────┐
-│ Staging / Silver  │  Cleaned, filtered, and enriched
-│                   │  Derived columns added
-│  S3: /staging/    │  Deduplication applied
+│ Staging / Silver  │  Cleaned, filtered, and enriched (PySpark)
+│                   │  Derived columns, deduplication applied
+│  S3: /staging/    │  Output: stg_yellow_tripdata
 └────────┬──────────┘
          │
          ▼
 ┌───────────────────┐
-│  Curated / Gold   │  Star schema — facts + dimensions
-│                   │  Surrogate keys generated
-│  S3: /curated/    │  Referential integrity validated
+│  Curated / Gold   │  Star schema built with dbt
+│                   │  5 models — facts + dimensions
+│  S3: /curated/    │  17 dbt tests — uniqueness, nulls,
+│  Athena: nyc_     │  referential integrity, accepted values
+│  taxi_curated     │  Surrogate keys via MD5 hash
 └────────┬──────────┘
          │
          ▼
@@ -81,7 +84,9 @@ dim_location ──── fact_yellow_tripdata ──── dim_payment
 |---|---|
 | **Apache Airflow** | Pipeline orchestration and scheduling |
 | **Astronomer CLI** | Local Airflow development environment |
-| **Apache Spark (PySpark)** | Distributed data transformation |
+| **Apache Spark (PySpark)** | Distributed data transformation — raw and staging layers |
+| **dbt (dbt-core)** | Curated layer transformation — star schema models, tests, and documentation |
+| **Astronomer Cosmos** | dbt integration with Airflow — one Airflow task per dbt model |
 | **AWS S3** | Data lake storage across all medallion layers |
 | **AWS Athena** | Serverless SQL query engine over S3 parquet files |
 | **AWS Glue** | Data catalog — schema registry for Athena tables |
@@ -113,27 +118,26 @@ Reads raw parquet files month by month and applies:
 - **Derived columns** — trip duration, pickup hour, day of week, weekend flag, tip rate, fare per mile, average speed
 - **Categorical enrichment** — payment type and rate code names mapped from lookup dictionaries
 - **Deduplication** — duplicate trip records present in raw TLC data removed using surrogate key
-- Output written to `s3://bucket/staging/fact_yellow_tripdata/` partitioned by year and month
+- Output written to `s3://bucket/staging/stg_yellow_tripdata/` partitioned by year and month
 
-### 3. Curated Layer — `curated_transform` Spark job
+### 3. Curated Layer — `curated_dbt` task group
 
-Reads staging data month by month and builds the star schema:
+Reads from the staging Athena table and builds the star schema using dbt. Each model is a separate Airflow task via Astronomer Cosmos:
 
-- **`fact_yellow_tripdata`** — surrogate key generated via SHA2-256 hash of natural keys, foreign keys to all dimension tables
-- **`dim_date`** — one row per calendar day for the configured year
-- **`dim_time`** — 168 rows covering all hour × day of week combinations
-- **`dim_location`** — 265 NYC taxi zones sourced from TLC reference CSV
-- **`dim_payment`** — 7 payment types with cash flag
+- **`fact_yellow_tripdata`** — surrogate key generated via MD5 hash of natural keys, foreign keys to all dimension tables, filtered by configured date range
+- **`dim_date`** — one row per calendar day for the configured date range, handles leap years automatically
+- **`dim_time`** — 168 rows covering all hour × day of week combinations with part of day label
+- **`dim_location`** — 265 NYC taxi zones sourced from TLC reference CSV loaded as a dbt seed
+- **`dim_payment`** — 6 payment types with cash flag loaded as a dbt seed
 
-### 4. Curated Quality Checks — `curated_quality_checks` Spark job
+### 4. Curated Quality Checks — dbt tests
 
-Validates the curated layer before it is consumed downstream:
+dbt tests run automatically as part of `dbt build` and validate the curated layer on every run:
 
-- Surrogate key uniqueness — no duplicate `trip_id` values
-- No null surrogate keys
-- Referential integrity — all foreign keys in facts exist in dimension tables
-- Row count threshold — catches silent pipeline failures
-- Cross month duplicate detection
+- **Uniqueness** — no duplicate surrogate keys across all dimension and fact tables
+- **Not null** — surrogate keys are never null
+- **Referential integrity** — all foreign keys in the fact table exist in the corresponding dimension tables
+- **Accepted values** — categorical columns (`payment_type`, `part_of_day`, `is_cash`, `weekend`) are validated against known value sets
 
 ### 5. BI Layer — AWS Athena + Apache Superset
 
@@ -147,14 +151,22 @@ The curated star schema is queryable via AWS Athena and visualised in Apache Sup
 
 ## Design Decisions
 
-### SHA2-256 Surrogate Keys
+### Silver Layer in Spark, Gold Layer in dbt
 
-Surrogate keys are generated as SHA2-256 hashes of the minimum set of natural key columns that uniquely identify a trip (`VendorID`, pickup datetime, dropoff datetime, pickup location, dropoff location, rate code, payment type).
+The staging (silver) layer uses PySpark for transformations that genuinely benefit from distributed processing — complex row-level filtering, deduplication via SHA2 hash, and month-by-month memory-constrained processing. The curated (gold) layer uses dbt for what is fundamentally SQL logic — building a star schema from already-clean data. This boundary keeps each tool in its domain of strength rather than forcing either to do something it isn't suited for.
+
+### MD5 Surrogate Keys in dbt
+
+Surrogate keys in the curated layer are generated as MD5 hashes of the minimum set of natural key columns that uniquely identify a trip (`VendorID`, pickup datetime, dropoff datetime, pickup location, dropoff location, rate code, payment type). Athena does not support SHA2, so MD5 via `to_hex(md5(to_utf8(...)))` is used instead — producing the same deterministic, stable key behaviour.
 
 This approach ensures:
 - **Stability** — the same trip always produces the same key regardless of when the pipeline runs
 - **Reproducibility** — keys can be regenerated from source data without a sequence generator
 - **Consistency** — safe to use across pipelines and systems without coordination
+
+### dbt Seeds for Static Reference Data
+
+`dim_payment` and `dim_location` are loaded as dbt seeds (CSV files version-controlled alongside the pipeline code) rather than being hardcoded in Python or read from S3 at runtime. This keeps reference data visible, auditable, and easy to update without touching application code.
 
 ### Partitioning by Year and Month
 
@@ -201,7 +213,7 @@ The NYC TLC raw dataset contains occasional duplicate trip records within the sa
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/airflow-nyc-taxi-data-pipeline.git
+git clone https://github.com/NB576/airflow-nyc-taxi-data-pipeline.git
 cd airflow-nyc-taxi-data-pipeline
 ```
 
@@ -235,7 +247,9 @@ terraform apply
 
 This creates:
 - S3 bucket `nyc-taxi-project-112025` with versioning enabled
-- `raw/` and `curated/` folder structure
+- `raw/`, `staging/`, and `curated/` folder structure
+- Glue databases `nyc_taxi_staging`, and `nyc_taxi_curated`
+- Glue crawlers for all medallion layers
 
 After applying, manually upload the TLC reference file:
 ```
@@ -310,6 +324,14 @@ In the Airflow UI, enable the `nyc_taxi` DAG and trigger it manually. The pipeli
 
 ---
 
+## dbt Lineage
+
+The curated layer is built and tested using dbt. The lineage graph below shows the full dependency chain from seeds and sources through to the curated star schema models.
+
+![dbt Lineage Graph](docs/screenshots/dbt-lineage.png)
+
+---
+
 ## Dashboards
 
 ### NYC Yellow Taxi Trips - Overview 
@@ -331,8 +353,8 @@ In the Airflow UI, enable the `nyc_taxi` DAG and trigger it manually. The pipeli
 ## Future Enhancements
 
 - **Cloud-native processing** — migrate from local Spark to AWS Glue or EMR for scalable cloud-native processing
-- **dbt integration** — replace curated Spark transforms with dbt models for better SQL-based lineage and testing
-- **Multi-year support** — extend the pipeline to process multiple years with a date range argument
-- **Schema validation** — add explicit schema validation checks at each medallion layer boundary
-- **Unit tests** — add pytest coverage for helper functions and transform logic
+- ~~**dbt integration**~~ ✅ — curated layer migrated to dbt models with full test coverage and lineage documentation
+- **Multi-year support** — extend the pipeline to process multiple years with a start and end date argument
+- **Schema validation** — add explicit schema validation at the raw and staging layer boundaries (curated layer is covered by dbt tests)
+- **Unit tests** — add pytest coverage for Python helper functions and Spark transform logic in the staging layer
 - **CI/CD** — add GitHub Actions workflow to run tests on every push
